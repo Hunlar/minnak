@@ -5,34 +5,50 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# ARQ starts one /luna request per API key every 10 seconds and keeps up
-# to 5 more waiting, so the last one in line can wait about a minute
+# ARQ request settings
 TIMEOUT_SECONDS = 120
 CONNECT_TIMEOUT_SECONDS = 10
-# ARQ refuses longer messages
+
+# ARQ query limit
 MAX_QUERY_CHARS = 4000
 
-# Shown in chats instead of an answer
-BUSY_TEXT = "Too many people are talking to me right now. Try again in a minute."
-UNAVAILABLE_TEXT = "I can't answer right now. Try again later."
+# Turkish error messages
+BUSY_TEXT = "Şu anda çok fazla kişi benimle konuşuyor. Bir dakika sonra tekrar dene."
+UNAVAILABLE_TEXT = "Şu anda cevap veremiyorum. Lütfen daha sonra tekrar dene."
+
+# Minnak language instruction
+TURKISH_INSTRUCTION = (
+    "ÇOK ÖNEMLİ: Sen Minnak adlı bir sohbet asistanısın. "
+    "Her koşulda ve istisnasız yalnızca Türkçe konuşmalısın. "
+    "Kullanıcı İngilizce, Arapça veya başka herhangi bir dilde yazsa bile "
+    "cevabını daima Türkçe ver. "
+    "Başka bir dilde cevap verme. "
+    "Türkçe karakterleri doğru kullan. "
+    "Samimi, doğal, akıcı ve insan gibi sohbet et. "
+    "Gerektiğinde espri yap, gerektiğinde ciddi ol. "
+    "Bu dil kuralını bütün sohbet boyunca koru.\n\n"
+)
 
 
 class LunaError(Exception):
-    """/luna gave no answer. The message is safe to show in chats."""
+    """ARQ cevap vermediğinde kullanılan hata."""
 
 
 def _json_body(response: httpx.Response) -> dict:
-    """The JSON object ARQ sent, or {} when it sent something else"""
+    """ARQ JSON cevabını okur."""
     try:
         body = response.json()
     except ValueError:
         return {}
+
     if isinstance(body, dict):
         return body
+
     return {}
 
 
 class ArqClient:
+
     def __init__(
         self,
         api_url: str,
@@ -40,11 +56,13 @@ class ArqClient:
         timeout: float = TIMEOUT_SECONDS,
         transport: Optional[httpx.AsyncBaseTransport] = None,
     ):
-        # transport: tests pass an httpx.MockTransport instead of the network
         self._client = httpx.AsyncClient(
             base_url=api_url.rstrip("/"),
             headers={"X-API-KEY": api_key},
-            timeout=httpx.Timeout(timeout, connect=CONNECT_TIMEOUT_SECONDS),
+            timeout=httpx.Timeout(
+                timeout,
+                connect=CONNECT_TIMEOUT_SECONDS
+            ),
             transport=transport,
         )
 
@@ -52,26 +70,49 @@ class ArqClient:
         await self._client.aclose()
 
     async def luna(self, text: str, user_id: int) -> str:
-        """Luna's answer to text. ARQ remembers the conversation per
-        user_id (and API key); 0 means no memory."""
+        """Minnak: Türkçe sohbet asistanı."""
+
+        query = TURKISH_INSTRUCTION + text
+
         try:
-            response = await self._client.get("luna", params={"query": text, "id": user_id})
+            response = await self._client.get(
+                "luna",
+                params={
+                    "query": query,
+                    "id": user_id
+                }
+            )
+
         except httpx.HTTPError as error:
-            # Connection problems and timeouts
-            logger.warning("Can't reach ARQ: %s", type(error).__name__)
+            logger.warning(
+                "ARQ bağlantı hatası: %s",
+                type(error).__name__
+            )
             raise LunaError(UNAVAILABLE_TEXT) from error
 
         body = _json_body(response)
         result = body.get("result")
+
         if response.status_code == 429:
             raise LunaError(BUSY_TEXT)
+
         if response.status_code in (401, 403):
-            logger.error("ARQ does not accept ARQ_API_KEY. Get a new key from @ARQRobot.")
+            logger.error(
+                "ARQ_API_KEY geçersiz. @ARQRobot üzerinden kontrol edin."
+            )
             raise LunaError(UNAVAILABLE_TEXT)
 
-        answered = response.status_code < 400 and body.get("ok") is True
+        answered = (
+            response.status_code < 400
+            and body.get("ok") is True
+        )
+
         if not answered or not isinstance(result, str) or not result.strip():
-            # ARQ's error text is about the request, never the user's message
-            logger.warning("ARQ /luna failed: HTTP %s, %r", response.status_code, result)
+            logger.warning(
+                "ARQ /luna hatası: HTTP %s, %r",
+                response.status_code,
+                result
+            )
             raise LunaError(UNAVAILABLE_TEXT)
+
         return result.strip()
