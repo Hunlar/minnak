@@ -54,7 +54,7 @@ $ docker run --rm -v "$PWD:/app" -w /app python:3.12.16-slim-trixie sh -c "pip i
 
 ## Heroku
 
-[![Deploy](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/TheHamkerCat/LunaChatBot/tree/master)
+[![Deploy](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/Hunlar/minnak)
 
 Heroku has no .env file: fill in the same names as Config Vars.
 
